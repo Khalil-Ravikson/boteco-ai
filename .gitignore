@@ -1,0 +1,26 @@
+# Ambientes Virtuais e Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Variáveis de Ambiente (NUNCA SUBIR ISTO)
+.env
+.env.local
+
+# Ficheiros temporários de Música (yt-dlp)
+*.mp3
+*.webm
+*.m4a
+*.part
+*.ytdl
+/tmp/
+
+# Logs
+*.log
+
+# Dados do Docker (Volumes locais)
+redis-data/
+evolution-instances/
