@@ -1,16 +1,11 @@
 """
-infrastructure/settings.py — Configurações centralizadas v3
+infrastructure/settings.py — Configurações do Boteco AI 🍻
 ============================================================
-MIGRAÇÃO v2 → v3:
-  REMOVIDO:  GROQ_*, DATABASE_URL, DB_USER/PASS/NAME, WAHA_*, LLAMA_CLOUD_API_KEY
-             (o LlamaParse agora é opcional — só necessário se PDF_PARSER=llamaparse)
-  ADICIONADO: GEMINI_*, REDIS_URL (Redis Stack substitui pgvector),
-              PDF_PARSER (escolha do parser de PDF), LLAMA_CLOUD_API_KEY (opcional)
+Usando Pydantic para validar variáveis de ambiente (.env).
 """
 import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -20,70 +15,33 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Gemini (substitui Groq) ───────────────────────────────────────────────
-    GEMINI_API_KEY:    str   = ""
-    GEMINI_MODEL:      str   = "gemini-2.0-flash"
-    GEMINI_TEMP:       float = 0.3
-    GEMINI_MAX_TOKENS: int   = 1024
+    # ── Inteligência Artificial (O Barman) ────────────────────────────────────
+    DEEPSEEK_API_KEY: str = ""
+    LLM_TEMPERATURE: float = 0.7  # Mais alto para respostas descontraídas/engraçadas
 
-    # ── HuggingFace (para BAAI/bge-m3) ───────────────────────────────────────
-    HF_TOKEN: str = ""
-
-    # ── Parser de PDF ─────────────────────────────────────────────────────────
-    # Escolhe qual parser usar para extrair texto dos PDFs.
-    #
-    # "pymupdf"    → local, gratuito, rápido (~50ms/pág). Default.
-    #                Bom para PDFs semi-estruturados.
-    #                Requer: pip install pymupdf
-    #
-    # "llamaparse" → cloud, pago (~$0.003/pág), melhor para tabelas complexas.
-    #                Requer: pip install llama-parse  +  LLAMA_CLOUD_API_KEY abaixo
-    #
-    # Podes também forçar por ficheiro individual no PDF_CONFIG (ingestion.py):
-    #   "edital_paes_2026.pdf": { ..., "parser": "llamaparse" }
-    PDF_PARSER: str = "pymupdf"
-
-    # ── LlamaParse (só necessário se PDF_PARSER=llamaparse) ───────────────────
-    # Obtém em: https://cloud.llamaindex.ai
-    LLAMA_CLOUD_API_KEY: str = ""
-
-    # ── RAG ───────────────────────────────────────────────────────────────────
-    DATA_DIR: str = "/app/dados"
-
-    # ── Redis Stack ───────────────────────────────────────────────────────────
-    # Substitui pgvector + redis:alpine da v2.
-    # DB 0 → bot (chunks, memória, vectores)
-    # DB 1 → Evolution API (cache de sessões)
-    REDIS_URL: str = "redis://localhost:6379/0"
+    # ── Redis (Fila do Celery e Memória) ──────────────────────────────────────
+    REDIS_URL: str = "redis://redis-stack:6379/1"
+    CELERY_BROKER_URL: str = "redis://redis-stack:6379/0"
 
     # ── Evolution API (WhatsApp) ──────────────────────────────────────────────
-    EVOLUTION_BASE_URL:      str = "http://localhost:8080"
+    EVOLUTION_BASE_URL:      str = "http://evolution-api:8080"
     EVOLUTION_API_KEY:       str = ""
     EVOLUTION_INSTANCE_NAME: str = "default"
-    WHATSAPP_HOOK_URL:       str = "http://bot:9000/webhook"
+    WHATSAPP_HOOK_URL:       str = "http://boteco-ai:9000/webhook"
 
-    # ── Agente ────────────────────────────────────────────────────────────────
-    AGENT_MAX_ITERATIONS: int = 6
-    AGENT_TIMEOUT_S:      int = 45
-    MAX_HISTORY_MESSAGES: int = 8
+    # ── Comportamento do Agente & Memória ─────────────────────────────────────
+    MAX_HISTORY_MESSAGES: int = 10    # Lembra das últimas 10 mensagens (poupa tokens)
+    AGENT_TIMEOUT_S: int = 15         # Respostas rápidas para não perder o timing da piada
+    AGENT_MAX_ITERATIONS: int = 3     # Previne loops infinitos e gastos desnecessários
+    ROUTER_SIMILARITY_THRESHOLD: float = 0.45 
 
-    # ── Semantic Router ───────────────────────────────────────────────────────
-    # Limiar de similaridade para o routing semântico.
-    # 0.0 = sempre usa a tool mais próxima (mesmo que pouco similar)
-    # 0.5 = só usa tool se a similaridade for >= 50% (mais conservador)
-    ROUTER_SIMILARITY_THRESHOLD: float = 0.35
-
-    # ── LangSmith (opcional) ──────────────────────────────────────────────────
-    LANGCHAIN_API_KEY:    str  = ""
-    LANGCHAIN_PROJECT:    str  = "uema-bot-v3"
-    LANGCHAIN_TRACING_V2: bool = False
+    # ── Segurança e Limites ───────────────────────────────────────────────────
+    GRUPO_PERMITIDO: str = ""         # ID do grupo onde o bot pode atuar (ex: 123456@g.us)
 
     # ── Dev / Debug ───────────────────────────────────────────────────────────
     DEV_MODE:      bool = False
-    DEV_WHITELIST: str  = ""
+    DEV_WHITELIST: str  = ""          # Números permitidos no modo dev (separados por vírgula)
     LOG_LEVEL:     str  = "INFO"
-
-    # ── Propriedades derivadas ────────────────────────────────────────────────
 
     @property
     def dev_whitelist_list(self) -> list[str]:
@@ -91,19 +49,8 @@ class Settings(BaseSettings):
             return []
         return [n.strip() for n in self.DEV_WHITELIST.split(",") if n.strip()]
 
-    @property
-    def langsmith_ativo(self) -> bool:
-        return bool(self.LANGCHAIN_API_KEY and self.LANGCHAIN_TRACING_V2)
-
-    @property
-    def llamaparse_disponivel(self) -> bool:
-        """True se o LlamaParse está configurado e pronto a usar."""
-        return bool(self.LLAMA_CLOUD_API_KEY) and self.PDF_PARSER.lower() == "llamaparse"
-
-
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-
 
 settings = get_settings()

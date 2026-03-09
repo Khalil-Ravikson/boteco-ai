@@ -1,46 +1,49 @@
 """
-agent/validator.py — Validação do output do agente
-===================================================
-Verifica se o output é enviável ao usuário antes de retornar.
-Testável com outputs mockados — sem I/O.
+agent/validator.py — O Segurança do Boteco (Sanitização)
+=========================================================
+Limpa o output do DeepSeek para garantir que ele não fala como um robô.
 """
 from __future__ import annotations
+import re
 from dataclasses import dataclass
-from src.agent.state import AgentState
-from src.agent.prompts import OUTPUTS_INVALIDOS, MSG_NAO_ENCONTRADO
-
 
 @dataclass
 class ValidationResult:
     valido:  bool
-    output:  str       # output sanitizado (pode ser diferente do original)
-    motivo:  str = ""  # razão da invalidação (para logs)
+    output:  str       # texto limpo e pronto para o WhatsApp
+    motivo:  str = ""  
 
+# Frases proibidas (Papo de robô)
+PAPO_CORPORATIVO = [
+    "como um modelo de linguagem",
+    "como uma inteligência artificial",
+    "fui desenvolvido pela",
+    "não tenho sentimentos",
+    "não posso ajudar com",
+    "sinto muito, mas",
+]
 
-def validar(state: AgentState, output: str) -> ValidationResult:
+def validar_deepseek(output: str) -> ValidationResult:
     """
-    Valida e sanitiza o output do agente.
-
-    Critérios:
-      1. Output não é string interna do LangChain
-      2. Output tem conteúdo mínimo (> 10 chars)
-      3. Iterações não excederam o limite (já controlado pelo core, mas dupla-checagem)
-
-    Puro: sem I/O, sem Redis, testável com assert.
+    Limpa o output do DeepSeek e garante que tem o tom certo para o grupo.
     """
     if not output:
-        return ValidationResult(False, MSG_NAO_ENCONTRADO, "output vazio")
+        return ValidationResult(False, "Foi mal, fiquei sem palavras! Pede um chopp aí. 🍻", "output vazio")
 
-    output_lower = output.strip().lower()
+    # 1. Limpar a tag <think> (Caso uses o modelo deepseek-reasoner R1 no futuro)
+    output_limpo = re.sub(r'<think>.*?</think>', '', output, flags=re.DOTALL).strip()
 
-    # Strings internas do LangChain
-    for invalido in OUTPUTS_INVALIDOS:
-        if invalido in output_lower:
-            return ValidationResult(False, MSG_NAO_ENCONTRADO,
-                                    f"output inválido: {invalido!r}")
+    output_lower = output_limpo.lower()
 
-    # Output muito curto suspeito
-    if len(output.strip()) < 10:
-        return ValidationResult(False, MSG_NAO_ENCONTRADO, "output muito curto")
+    # 2. Intercetar papo corporativo
+    for chato in PAPO_CORPORATIVO:
+        if chato in output_lower:
+            resposta_zoeira = "Ih, não me meto nessa! Sou só o boteco-ai. 🍻 Pede uma música ou manda figurinha!"
+            return ValidationResult(True, resposta_zoeira, "bloqueou papo corporativo")
 
-    return ValidationResult(True, output.strip())
+    # 3. Output demasiado curto
+    if len(output_limpo) < 2:
+        return ValidationResult(False, "Manda de novo que não entendi nada! 🍺", "output muito curto")
+
+    # Retorna o texto limpinho
+    return ValidationResult(True, output_limpo)
