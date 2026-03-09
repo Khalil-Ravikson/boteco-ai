@@ -1,50 +1,52 @@
 """
-memory/playlist_manager.py — O Caderno do DJ 📓
-================================================
-Gere a fila de músicas usando as listas do Redis.
+memory/playlist_manager.py — v2 (Reforçado) 📓
 """
 import redis
+import logging
 from src.infrastructure.settings import settings
 
-# Criamos uma conexão direta ao Redis (DB 1) configurado no settings
+logger = logging.getLogger(__name__)
+
+# Singleton para o Pool de Conexões
+_redis_pool = None
+
 def _get_redis():
-    # decode_responses=True já devolve strings em vez de bytes!
-    return redis.from_url(settings.REDIS_URL, decode_responses=True)
+    global _redis_pool
+    if _redis_pool is None:
+        # Usamos o pool para gerir conexões de forma eficiente
+        _redis_pool = redis.ConnectionPool.from_url(
+            settings.REDIS_URL, 
+            decode_responses=True,
+            max_connections=20
+        )
+    return redis.Redis(connection_pool=_redis_pool)
 
 def adicionar_a_fila(chat_id: str, nome_musica: str) -> int:
-    """Adiciona uma música ao final da fila do grupo e retorna o tamanho da fila."""
     r = _get_redis()
-    chave_fila = f"playlist:{chat_id}"
-    return r.rpush(chave_fila, nome_musica)
+    return r.rpush(f"playlist:{chat_id}", nome_musica)
 
 def pegar_proxima_musica(chat_id: str) -> str | None:
-    """Tira a primeira música da fila e retorna o nome dela."""
     r = _get_redis()
-    chave_fila = f"playlist:{chat_id}"
-    return r.lpop(chave_fila)
+    return r.lpop(f"playlist:{chat_id}")
 
 def ver_fila(chat_id: str) -> list[str]:
-    """Retorna todas as músicas que estão na fila atualmente."""
     r = _get_redis()
-    chave_fila = f"playlist:{chat_id}"
-    return r.lrange(chave_fila, 0, -1)
+    return r.lrange(f"playlist:{chat_id}", 0, -1)
 
 def limpar_fila(chat_id: str):
-    """Apaga a fila de músicas do grupo."""
     r = _get_redis()
-    chave_fila = f"playlist:{chat_id}"
-    r.delete(chave_fila)
+    r.delete(f"playlist:{chat_id}")
+    r.delete(f"lock:dj:{chat_id}")
 
-def dj_esta_ocupado(chat_id: str) -> bool:
-    """Verifica se o bot já está a baixar/enviar uma música para este grupo."""
+def tentar_ocupar_dj(chat_id: str) -> bool:
+    """
+    Tenta obter o lock atómico (SET NX). 
+    Retorna True se conseguiu trancar, False se já estava ocupado.
+    """
     r = _get_redis()
-    return bool(r.get(f"lock:dj:{chat_id}"))
+    # NX=True (Só cria se não existir), EX=300 (Expira em 5 min se o bot cair)
+    return bool(r.set(f"lock:dj:{chat_id}", "1", nx=True, ex=300))
 
-def set_dj_ocupado(chat_id: str, ocupado: bool):
-    """Tranca ou destranca o DJ para este grupo (com timeout de segurança de 5 min)."""
+def liberar_dj(chat_id: str):
     r = _get_redis()
-    chave = f"lock:dj:{chat_id}"
-    if ocupado:
-        r.setex(chave, 300, "1")
-    else:
-        r.delete(chave)
+    r.delete(f"lock:dj:{chat_id}")

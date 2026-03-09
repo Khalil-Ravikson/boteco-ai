@@ -9,10 +9,12 @@ NOVO em v2:
 
   Isto resolve o "exists:false" sem depender do senderPn.
 """
+
 from __future__ import annotations
+import os
 import logging
 import httpx
-
+import base64
 from src.infrastructure.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -28,8 +30,8 @@ class EvolutionService:
             "apikey":       self.api_key,
         }
         self.webhook_url = settings.WHATSAPP_HOOK_URL
-
-    # ------------------------------------------------------------------
+        self.logger   = logger
+    # ------------------------- -----------------------------------------
     # STATUS E AUTO-RECUPERAÇÃO
     # ------------------------------------------------------------------
 
@@ -162,3 +164,82 @@ class EvolutionService:
                     return False
 
         return False
+
+    async def enviar_audio_local(self, chat_id: str, caminho_arquivo: str) -> bool:
+        """
+        Envia áudio MP3 local. Corrigido para evitar 400 Bad Request.
+        """
+        if not os.path.exists(caminho_arquivo):
+            self.logger.error("❌ Arquivo não encontrado: %s", caminho_arquivo)
+            return False
+
+        try:
+            with open(caminho_arquivo, "rb") as f:
+                # Pegamos apenas a string base64 pura
+                audio_base64 = base64.b64encode(f.read()).decode("utf-8")
+            
+            payload = {
+                "number": chat_id,
+                "audio": audio_base64, # 👈 Apenas o base64 puro aqui
+                "delay": 1200,
+                "encoding": True
+            }
+
+            url = f"{self.base_url}/message/sendWhatsAppAudio/{self.instance}"
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                if resp.status_code not in (200, 201):
+                    self.logger.error("❌ Erro Evolution (%s): %s", resp.status_code, resp.text)
+                    return False
+                
+            self.logger.info("✅ Áudio enviado com sucesso para %s", chat_id)
+            if os.path.exists(caminho_arquivo): os.remove(caminho_arquivo)
+            return True
+        except Exception as e:
+            self.logger.error("❌ Falha crítica no envio de áudio: %s", e)
+            return False
+
+    async def enviar_sticker_local(self, chat_id: str, caminho_arquivo: str) -> bool:
+        """
+        Envia figurinha local. Corrigido para evitar 400 Bad Request.
+        """
+        if not os.path.exists(caminho_arquivo): return False
+        try:
+            with open(caminho_arquivo, "rb") as f:
+                sticker_b64 = base64.b64encode(f.read()).decode("utf-8")
+                
+            payload = {
+                "number": chat_id,
+                "sticker": sticker_b64 # 👈 Apenas o base64 puro aqui
+            }
+            
+            url = f"{self.base_url}/message/sendSticker/{self.instance}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                resp.raise_for_status()
+                
+            self.logger.info("✅ Figurinha enviada para %s", chat_id)
+            if os.path.exists(caminho_arquivo): os.remove(caminho_arquivo)
+            return True
+        except Exception as e:
+            self.logger.error("❌ Erro ao enviar figurinha: %s", e)
+            return False
+            
+    async def baixar_media_em_base64(self, message_id: str) -> str | None:
+        """
+        Pede à Evolution API para converter a imagem da mensagem em Base64.
+        """
+        try:
+            url = f"{self.base_url}/message/getBase64FromMediaMessage/{self.instance}"
+            payload = {"message": {"key": {"id": message_id}}}
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=payload, headers=self.headers)
+                if resp.status_code == 200:
+                    # Retorna a string base64 pura
+                    return resp.json().get("base64")
+            return None
+        except Exception as e:
+            self.logger.error("❌ Erro ao baixar media: %s", e)
+            return None

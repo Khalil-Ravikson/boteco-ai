@@ -1,72 +1,51 @@
 """
-providers/groq_provider.py — Groq LLM com retry e métricas
-===========================================================
-Encapsula:
-  - Instanciação do ChatGroq
-  - Retry automático em 429 (rate limit) com backoff exponencial
-  - Contagem de tokens de entrada/saída
-  - Timeout configurável
-
-Nunca deixa o erro 429 vazar para cima — trata aqui.
+providers/groq_provider.py — O Motor Ultrarrápido do Boteco ⚡
+============================================================
+Usa AsyncOpenAI para falar com o Groq com estabilidade total.
 """
-from __future__ import annotations
 import logging
-import time
-from functools import lru_cache
-from langchain_groq import ChatGroq
+from openai import AsyncOpenAI
+from tenacity import retry, wait_exponential, stop_after_attempt
 from src.infrastructure.settings import settings
+from src.agent.prompts import SYSTEM_BOTECO
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES  = 3
-_BACKOFF_BASE = 2.0   # segundos — dobra a cada tentativa
+# O Groq é 100% compatível com a biblioteca da OpenAI
+client = AsyncOpenAI(
+    api_key=settings.GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
+)
 
-
-@lru_cache(maxsize=1)
-def get_llm(
-    model: str | None = None,
-    temperature: float | None = None,
-    max_tokens: int | None = None,
-) -> ChatGroq:
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True
+)
+async def chamar_groq(prompt_usuario: str, system_prompt: str = SYSTEM_BOTECO) -> str:
     """
-    Retorna uma instância singleton do ChatGroq.
-    Os parâmetros padrão vêm de settings — substituíveis para testes.
+    Chama a API do Groq de forma assíncrona e estável.
     """
-    return ChatGroq(
-        api_key=settings.GROQ_API_KEY,
-        model=model or settings.GROQ_MODEL,
-        temperature=temperature if temperature is not None else settings.GROQ_TEMP,
-        max_tokens=max_tokens or settings.GROQ_MAX_TOKENS,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=settings.GROQ_MODEL, # Ex: llama-3.3-70b-versatile
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_usuario},
+            ],
+            temperature=settings.GROQ_TEMP, 
+            max_tokens=settings.GROQ_MAX_TOKENS
+        )
+        
+        conteudo = response.choices[0].message.content
+        logger.info("✅ Groq respondeu com sucesso.")
+        return conteudo
 
-
-def invocar_com_retry(llm: ChatGroq, messages: list, **kwargs) -> str:
-    """
-    Chama o LLM com retry automático em 429.
-    Retorna o conteúdo de texto da resposta.
-
-    Raises:
-        RuntimeError: após esgotar os retries ou em erro não-429.
-    """
-    for tentativa in range(1, _MAX_RETRIES + 1):
-        try:
-            resposta = llm.invoke(messages, **kwargs)
-            return resposta.content
-        except Exception as e:
-            err = str(e)
-            is_429 = "429" in err or "rate_limit" in err.lower() or "too many requests" in err.lower()
-
-            if is_429 and tentativa < _MAX_RETRIES:
-                espera = _BACKOFF_BASE ** tentativa
-                logger.warning(
-                    "⏳ Rate limit Groq (tentativa %d/%d). Aguardando %.0fs...",
-                    tentativa, _MAX_RETRIES, espera,
-                )
-                time.sleep(espera)
-                continue
-
-            if is_429:
-                logger.error("❌ Rate limit Groq esgotado após %d tentativas.", _MAX_RETRIES)
-                raise RuntimeError("rate_limit_esgotado") from e
-
-            raise
+    except Exception as e:
+        err_msg = str(e)
+        if "429" in err_msg:
+            logger.warning("⏳ Rate limit no Groq. O retry vai tentar novamente...")
+            raise e # Lança para o tenacity fazer o retry
+        
+        logger.error(f"❌ Erro na API do Groq: {e}")
+        return "O barman está ocupado a limpar o balcão. Tenta de novo num segundo! 🍺"

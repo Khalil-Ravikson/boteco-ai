@@ -1,13 +1,12 @@
 """
 main.py — O Ponto de Partida do Boteco 🚀
 ==========================================
-Inicializa a API, Redis e conecta o Webhook.
+Inicializa a API e conecta o Webhook.
 """
 import logging
 from fastapi import FastAPI
 from src.infrastructure.settings import settings
 from src.application.handle_webhook import router as webhook_router
-from src.infrastructure.redis_client import inicializar_redis
 
 # Configuração de Logs
 logging.basicConfig(
@@ -21,10 +20,6 @@ app = FastAPI(title="Boteco AI 🍻", version="1.0.0")
 @app.on_event("startup")
 async def startup_event():
     logger.info("🚀 Abrindo as portas do Boteco AI...")
-    
-    # Inicia a conexão ao Redis
-    inicializar_redis()
-    
     logger.info("✅ Tudo pronto. À espera de clientes...")
 
 # Rotas

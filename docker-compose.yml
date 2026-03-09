@@ -109,7 +109,7 @@ services:
 
       # Webhook (Mudei para o serviço "bot" e desliguei temporariamente)
       - WEBHOOK_GLOBAL_URL=http://bot:9000/webhook
-      - WEBHOOK_GLOBAL_ENABLED=false   # <--- DEIXA FALSE PARA ELE FICAR CALADO
+      - WEBHOOK_GLOBAL_ENABLED=true  # <--- DEIXA FALSE PARA ELE FICAR CALADO
       - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
       - WEBHOOK_EVENTS_CONNECTION_UPDATE=true
 
@@ -151,9 +151,10 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://boteco-redis:6379/1
+      - CELERY_BROKER_URL=redis://boteco-redis:6379/2
       - EVOLUTION_BASE_URL=http://evolution-api:8080
-      - WHATSAPP_HOOK_URL=http://boteco-ai:9000/webhook
+      - WHATSAPP_HOOK_URL=http://bot:9000/webhook
       - TZ=America/Sao_Paulo
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9000/ || exit 1"]
@@ -176,14 +177,13 @@ services:
         condition: service_healthy
     volumes:
       - ./src:/app/src
-      - /tmp:/tmp  # CRÍTICO: Onde o yt-dlp guarda as músicas antes de enviar!
+      - yt-dlp-tmp:/tmp # CRÍTICO: Onde o yt-dlp guarda as músicas antes de enviar!
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - EVOLUTION_BASE_URL=http://evolution-api:8080
+      - CELERY_BROKER_URL=redis://boteco-redis:6379/2
       - TZ=America/Sao_Paulo
     command: celery -A src.infrastructure.celery_app.celery_app worker --loglevel=info --concurrency=2
 
@@ -192,3 +192,5 @@ volumes:
     driver: local
   evolution-pg-data:
     driver: local
+  yt-dlp-tmp:
+  evolution_instances:

@@ -19,9 +19,17 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = ""
     LLM_TEMPERATURE: float = 0.7  # Mais alto para respostas descontraídas/engraçadas
 
+    # Adicionamos estas aqui para o Groq funcionar:
+    GROQ_API_KEY:     str = ""
+    GROQ_MODEL:       str = "llama-3.3-70b-versatile"
+    GROQ_TEMP:        float = 0.7
+    GROQ_MAX_TOKENS:  int = 300
+
+
+
     # ── Redis (Fila do Celery e Memória) ──────────────────────────────────────
-    REDIS_URL: str = "redis://redis-stack:6379/1"
-    CELERY_BROKER_URL: str = "redis://redis-stack:6379/0"
+    REDIS_URL: str = "redis://boteco-redis:6379/1"
+    CELERY_BROKER_URL: str = "redis://boteco-redis:6379/2"
 
     # ── Evolution API (WhatsApp) ──────────────────────────────────────────────
     EVOLUTION_BASE_URL:      str = "http://evolution-api:8080"
