@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+celery
+redis
+pydantic
+pydantic-settings
+httpx
+openai
+tenacity
+yt-dlp

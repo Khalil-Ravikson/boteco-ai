@@ -1,50 +1,35 @@
 """
-application/handle_webhook.py — Extração e validação do payload (v2 — Evolution API)
-=====================================================================================
-Recebe o payload bruto do FastAPI, valida com DevGuard,
-converte para Mensagem (domain entity) e chama handle_message.
-
-MIGRAÇÃO WAHA → EVOLUTION:
-  - WahaService substituído por EvolutionService
-  - identity agora inclui "push_name" (nome do contato no WhatsApp)
+application/handle_webhook.py — A Porta de Entrada 🔌
+======================================================
+Recebe os eventos do WhatsApp (Evolution API) e envia para processamento.
 """
-from __future__ import annotations
 import logging
-
-from src.domain.entities import Mensagem
-from src.application.handle_message import handle_message
+from fastapi import APIRouter, Request, BackgroundTasks
 from src.middleware.dev_guard import DevGuard
+from src.infrastructure.redis_client import get_redis_text
 from src.services.evolution_service import EvolutionService
+from src.application.handle_message import processar_mensagem
 
 logger = logging.getLogger(__name__)
+router = APIRouter()
+evolution_service = EvolutionService()
 
-
-async def handle_webhook(
-    payload: dict,
-    guard: DevGuard,
-    evolution: EvolutionService,
-) -> dict:
-    """
-    Ponto de entrada de toda mensagem recebida.
-
-    Retorna:
-      {"status": "ok"} sempre (Evolution não precisa de resposta específica)
-    """
-    ok, resultado = await guard.validar(payload)
-
-    if not ok:
-        logger.debug("🛑 DevGuard bloqueou: %s", resultado)
-        return {"status": "blocked", "reason": resultado}
-
-    identity: dict = resultado
-
-    mensagem = Mensagem(
-        user_id   = identity["sender_phone"],
-        chat_id   = identity["chat_id"],
-        body      = identity.get("body", ""),
-        has_media = identity.get("has_media", False),
-        msg_type  = identity.get("msg_type", "conversation"),
-    )
-
-    await handle_message(mensagem, evolution)
-    return {"status": "ok"}
+@router.post("/webhook")
+async def evolution_webhook(request: Request, background_tasks: BackgroundTasks):
+    try:
+        payload = await request.json()
+        redis_conn = get_redis_text()
+        guard = DevGuard(redis_conn)
+        
+        # O Segurança verifica se a mensagem é válida e do grupo correto
+        valido, identity = await guard.validar(payload)
+        
+        if valido:
+            # Lança o processamento em background (assim a API responde 200 OK na hora)
+            background_tasks.add_task(processar_mensagem, identity, evolution_service)
+            
+        return {"status": "ok", "valido": valido}
+        
+    except Exception as e:
+        logger.error(f"❌ Erro crítico no webhook: {e}")
+        return {"status": "error", "message": str(e)}
