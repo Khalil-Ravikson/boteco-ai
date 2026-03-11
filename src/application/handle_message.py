@@ -1,49 +1,45 @@
 """
 application/handle_message.py — O Maestro do Boteco 🎼
 =======================================================
-Recebe a mensagem, passa pelo Regex e aciona a ação correta.
+CORREÇÃO: task_gerar_figurinha agora recebe (chat_id, media_base64)
+em vez de (message_id, chat_id). O base64 vem do payload do webhook.
 """
 import logging
 from src.services.evolution_service import EvolutionService
 from src.domain.guardrails import guardrails
-from src.agent.core import agent_boteco  
-# 👇 Aqui está o import corrigido! 👇
+from src.agent.core import agent_boteco
 from src.memory.playlist_manager import adicionar_a_fila, ver_fila, limpar_fila, tentar_ocupar_dj
 from src.application.tasks import task_dj_tocar_musica, task_gerar_figurinha
 
 logger = logging.getLogger(__name__)
 
+
 async def processar_mensagem(identity: dict, evolution: EvolutionService):
-    chat_id = identity["chat_id"]
+    chat_id      = identity["chat_id"]
     sender_phone = identity["sender_phone"]
-    body = identity["body"]
-    has_media = identity["has_media"]
-    message_id = identity["message_id"]
-    # 🟢 CAPTURA O PUXÃO DE LADO (Reply)
-    quoted_id = identity.get("quoted_message_id")
-    quoted_type = identity.get("quoted_type") # ex: 'imageMessage'
-    has_media = identity["has_media"] or (quoted_type == "imageMessage")
-    # 1. Roteador Regex decide o que fazer
+    push_name    = identity["push_name"]
+    body         = identity["body"]
+    has_media    = identity["has_media"]
+    media_base64 = identity.get("media_base64")  # ✅ base64 do webhook
+
     acao_bot = guardrails.analisar(body, has_media)
 
-    # 2. Respostas imediatas (Menu, Erros)
+    # Bloco 1 — Resposta imediata
     if acao_bot.resposta_rapida:
         await evolution.enviar_mensagem(chat_id, acao_bot.resposta_rapida)
 
-    # 3. Execução das Ações
-
-    # 🎵 MÚSICA
-    elif acao_bot.acao == "TOCAR_MUSICA":
+    # Bloco 2 — Ação principal
+    if acao_bot.acao == "TOCAR_MUSICA":
         musica_pedida = acao_bot.parametro
-        
-        # O novo Lock Atómico em ação!
         if tentar_ocupar_dj(chat_id):
             await evolution.enviar_mensagem(chat_id, f"🎵 Na mão! Buscando: *{musica_pedida}*...")
             task_dj_tocar_musica.delay(chat_id, musica_pedida)
         else:
-            # Se não conseguiu ocupar, o DJ já está tocando e adicionamos à fila
             tamanho_fila = adicionar_a_fila(chat_id, musica_pedida)
-            await evolution.enviar_mensagem(chat_id, f"📝 DJ ocupado! *{musica_pedida}* foi pra fila (Posição: {tamanho_fila})")
+            await evolution.enviar_mensagem(
+                chat_id,
+                f"📝 DJ ocupado! *{musica_pedida}* foi pra fila (Posição: {tamanho_fila})",
+            )
 
     elif acao_bot.acao == "VER_FILA":
         fila = ver_fila(chat_id)
@@ -57,31 +53,26 @@ async def processar_mensagem(identity: dict, evolution: EvolutionService):
 
     elif acao_bot.acao == "LIMPAR_FILA":
         limpar_fila(chat_id)
-        # O guardrails já envia a resposta de confirmação
 
-    # 🖼️ FIGURINHA
     elif acao_bot.acao == "FAZER_FIGURINHA":
-        # 🟢 Pega o ID da mensagem respondida (se houver)
-        quoted_id = identity.get("quoted_message_id")
-        quoted_type = identity.get("quoted_type")
-        # Define se o alvo é a foto citada ou a foto atual
-        target_id = quoted_id if (quoted_id and quoted_type == "imageMessage") else message_id
-        logger.info(f"🎨 Enviando task de figurinha para o ID: {target_id}")
-        task_gerar_figurinha.delay(target_id, chat_id)
+        if not media_base64:
+            # Segurança extra: não deveria chegar aqui sem base64
+            await evolution.enviar_mensagem(
+                chat_id,
+                "⚠️ Não consegui obter a imagem. Tenta mandar a foto de novo com `!s`!",
+            )
+            return
+        logger.info("🎨 Enviando task de figurinha para %s (base64=%d chars)", chat_id, len(media_base64))
+        task_gerar_figurinha.delay(chat_id, media_base64)
 
-    # 📣 CHAMAR TODOS
     elif acao_bot.acao == "CHAMAR_TODOS":
-        texto = acao_bot.parametro or "📣 Acorda galera!"
-        await evolution.enviar_mensagem(chat_id, texto)
+        await evolution.enviar_mensagem(chat_id, acao_bot.parametro)
 
-    # 🧠 BATER PAPO (Com Memória!)
     elif acao_bot.acao == "LLM":
-        # Formata a mensagem com o nome de quem enviou (Útil para grupos)
-        corpo_com_nome = f"[{identity['push_name']}]: {body}"
-        
+        corpo_com_nome = f"[{push_name}]: {body}"
         resposta_final = await agent_boteco.conversar(
-            user_id=sender_phone, 
+            user_id=sender_phone,
             session_id=chat_id,
-            mensagem=corpo_com_nome
+            mensagem=corpo_com_nome,
         )
         await evolution.enviar_mensagem(chat_id, resposta_final)

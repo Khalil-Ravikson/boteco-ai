@@ -1,7 +1,11 @@
 """
 infrastructure/settings.py — Configurações do Boteco AI 🍻
 ============================================================
-Usando Pydantic para validar variáveis de ambiente (.env).
+CORREÇÕES:
+  - NOVO: ALLOW_SELF_MESSAGES — quando True, o dono do número conectado
+    pode usar comandos (!play, !s, etc.) enviando mensagens para o grupo.
+    Por padrão False (comportamento seguro original).
+    Para ativar: adicione ALLOW_SELF_MESSAGES=true no .env
 """
 import os
 from functools import lru_cache
@@ -16,19 +20,16 @@ class Settings(BaseSettings):
     )
 
     # ── Inteligência Artificial (O Barman) ────────────────────────────────────
-    DEEPSEEK_API_KEY: str = ""
-    LLM_TEMPERATURE: float = 0.7  # Mais alto para respostas descontraídas/engraçadas
+    DEEPSEEK_API_KEY: str   = ""
+    LLM_TEMPERATURE:  float = 0.7
 
-    # Adicionamos estas aqui para o Groq funcionar:
-    GROQ_API_KEY:     str = ""
-    GROQ_MODEL:       str = "llama-3.3-70b-versatile"
-    GROQ_TEMP:        float = 0.7
-    GROQ_MAX_TOKENS:  int = 300
-
-
+    GROQ_API_KEY:    str   = ""
+    GROQ_MODEL:      str   = "llama-3.3-70b-versatile"
+    GROQ_TEMP:       float = 0.7
+    GROQ_MAX_TOKENS: int   = 300
 
     # ── Redis (Fila do Celery e Memória) ──────────────────────────────────────
-    REDIS_URL: str = "redis://boteco-redis:6379/1"
+    REDIS_URL:         str = "redis://boteco-redis:6379/1"
     CELERY_BROKER_URL: str = "redis://boteco-redis:6379/2"
 
     # ── Evolution API (WhatsApp) ──────────────────────────────────────────────
@@ -38,24 +39,29 @@ class Settings(BaseSettings):
     WHATSAPP_HOOK_URL:       str = "http://boteco-ai:9000/webhook"
 
     # ── Comportamento do Agente & Memória ─────────────────────────────────────
-    MAX_HISTORY_MESSAGES: int = 10    # Lembra das últimas 10 mensagens (poupa tokens)
-    AGENT_TIMEOUT_S: int = 15         # Respostas rápidas para não perder o timing da piada
-    AGENT_MAX_ITERATIONS: int = 3     # Previne loops infinitos e gastos desnecessários
-    ROUTER_SIMILARITY_THRESHOLD: float = 0.45 
+    MAX_HISTORY_MESSAGES:       int   = 10
+    AGENT_TIMEOUT_S:            int   = 15
+    AGENT_MAX_ITERATIONS:       int   = 3
+    ROUTER_SIMILARITY_THRESHOLD: float = 0.45
 
     # ── Segurança e Limites ───────────────────────────────────────────────────
-    GRUPO_PERMITIDO: str = ""         # ID do grupo onde o bot pode atuar (ex: 123456@g.us)
+    GRUPO_PERMITIDO: str = ""
 
     # ── Dev / Debug ───────────────────────────────────────────────────────────
     DEV_MODE:      bool = False
-    DEV_WHITELIST: str  = ""          # Números permitidos no modo dev (separados por vírgula)
+    DEV_WHITELIST: str  = ""
     LOG_LEVEL:     str  = "INFO"
+
+    # ✅ NOVO: permite que o dono do número use comandos no grupo
+    #    Adicione ALLOW_SELF_MESSAGES=true no .env para ativar
+    ALLOW_SELF_MESSAGES: bool = False
 
     @property
     def dev_whitelist_list(self) -> list[str]:
         if not self.DEV_WHITELIST:
             return []
         return [n.strip() for n in self.DEV_WHITELIST.split(",") if n.strip()]
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
